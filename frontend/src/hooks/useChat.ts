@@ -25,7 +25,6 @@ export function useChat({
   conversationId,
   messages,
   isLoading,
-  chunks,
   setMessages,
   setLoading,
   onAddDocument,
@@ -46,10 +45,8 @@ export function useChat({
     setError(null);
 
     /*
-     * Show user message immediately.
-     *
-     * This is temporary. Once the backend responds, it is replaced
-     * with the actual database-backed user message.
+     * Show temporary user message immediately while request processes.
+     * Replaced by backend database entry upon success.
      */
     const temporaryUserMessage: Message | null = trimmedMessage
       ? {
@@ -65,7 +62,7 @@ export function useChat({
     }
 
     /*
-     * Trigger temporary frontend title generation on the first turn.
+     * Trigger frontend title generation on initial turn.
      */
     if (isFirstTurn && onGenerateTitle && trimmedMessage) {
       onGenerateTitle(conversationId, trimmedMessage);
@@ -80,6 +77,7 @@ export function useChat({
           files.map((file) => analyzeFile(file, conversationId)),
         );
 
+        // Update application document list for UI rendering
         analyses.forEach((analysis, i) =>
           onAddDocument({
             id: analysis.document.id,
@@ -92,16 +90,14 @@ export function useChat({
           }),
         );
 
-        const newChunks = analyses.flatMap((analysis) => analysis.chunks);
-        const combinedChunks = [...chunks, ...newChunks];
-
         if (trimmedMessage) {
+          /*
+           * Send user prompt. Backend performs vector retrieval against DB.
+           */
           const { userMessage, assistantMessage } =
             await sendConversationMessage({
               conversationId,
               content: trimmedMessage,
-              chunks: combinedChunks,
-              groundingChunks: newChunks,
             });
 
           /*
@@ -139,19 +135,17 @@ export function useChat({
         }
       } else {
         /*
-         * Standard message turn.
-         * PostgreSQL handles message persistence.
+         * Standard message turn. Server handles pgvector retrieval and message storage.
          */
         const { userMessage, assistantMessage } = await sendConversationMessage(
           {
             conversationId,
             content: trimmedMessage,
-            chunks,
           },
         );
 
         /*
-         * Replace temporary user message with real database-backed
+         * Replace temporary user message with database-backed
          * message and append assistant response.
          */
         setMessages((prev) => [
@@ -162,7 +156,7 @@ export function useChat({
       }
     } catch (err) {
       /*
-       * Backend request failed, so remove temporary message.
+       * Backend request failed, clean up temporary user message entry.
        */
       if (temporaryUserMessage) {
         setMessages((prev) =>

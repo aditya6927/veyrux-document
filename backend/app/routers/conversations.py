@@ -1,10 +1,12 @@
 import asyncio
 import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.repositories.conversation_repository import ConversationRepository
+from app.repositories.document_repository import DocumentRepository
 from app.repositories.message_repository import MessageRepository
 from app.schemas.chat import (
     ChatMessage,
@@ -73,18 +75,44 @@ async def send_message(
         for m in db_messages
     ]
 
+    document_repo = DocumentRepository(db)
+
+    # Generate query embedding off thread for backend similarity retrieval
+    query_embedding = await asyncio.to_thread(
+        gemini_service.embed_texts,
+        [request.content.strip()],
+        "RETRIEVAL_QUERY"
+    )
+
+    # Query database chunks using pgvector distance search scoped to conversation
+    relevant_chunks = await document_repo.search_similar_chunks(
+        conversation_id=conversation_id,
+        query_embedding=query_embedding[0],
+        top_k=5
+    )
+
+    # # Temporary verification log for pgvector retrieval
+    # print("\n" + "=" * 50)
+    # print("RETRIVIAL VERIFICATION LOG:")
+    # print(f"Query: '{request.content.strip()}'")
+    # print(f"Retrieved {len(relevant_chunks)} chunks from pgvector:")
+    # for idx, chunk in enumerate(relevant_chunks, 1):
+    #     print(f"  [{idx}] Source: {chunk.source} | Page: {chunk.page_number} | Preview: {chunk.content[:80]}...")
+    # print("=" * 50 + "\n")
+
     try:
         # Run synchronous Gemini call off the main thread
         response_text = await asyncio.to_thread(
             gemini_service.chat,
             chat_history,
-            request.chunks,
-            request.grounding_chunks
+            list(relevant_chunks)
         )
     except ServiceError as e:
-        raise HTTPException(status_code=502, detail=f"Model gateway error: {e.message}")
+        raise HTTPException(status_code=502,
+                            detail=f"Model gateway error: {e.message}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Critical internal failure: {str(e)}")
+        raise HTTPException(status_code=500,
+                            detail=f"Critical internal failure: {str(e)}")
 
     # Save model response
     assistant_msg = await msg_repo.create(

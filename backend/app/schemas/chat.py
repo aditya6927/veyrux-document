@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from enum import Enum
 from typing import Optional
 
-from app.schemas.document import Chunk
+from app.schemas.document import Chunk, DocumentResponse
 
 
 class ChatRole(str, Enum):
@@ -34,19 +34,6 @@ class MessageResponse(BaseModel):
     created_at: datetime
 
 
-class DocumentResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: uuid.UUID
-    conversation_id: uuid.UUID
-    filename: str | None
-    mime_type: str
-    document_type: str
-    metadata: dict = Field(default_factory=dict)
-    created_at: datetime
-    chunks: list[Chunk] = Field(default_factory=list)
-
-
 class ConversationResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -59,9 +46,11 @@ class ConversationResponse(BaseModel):
 
 
 class ChatSendMessageRequest(BaseModel):
+    """
+    Request schema for user chat messages.
+    Backend owns vector retrieval; client only sends the text prompt.
+    """
     content: str
-    chunks: Optional[list[Chunk]] = None
-    grounding_chunks: Optional[list[Chunk]] = None
 
 
 class SendMessageResponse(BaseModel):

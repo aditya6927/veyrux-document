@@ -4,7 +4,6 @@ import uuid
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from enum import Enum
 from typing import Any
-from pydantic import AliasChoices
 
 class DocumentType(str, Enum):
     PDF   = 'pdf'
@@ -68,7 +67,7 @@ class DocumentResponse(BaseModel):
 
     metadata: dict = Field(
         default_factory=dict,
-        validation_alias=AliasChoices("metadata", "metadata_"),
+        validation_alias="metadata_",
         serialization_alias="metadata",
     )
 

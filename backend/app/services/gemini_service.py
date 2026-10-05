@@ -45,7 +45,6 @@ BLOCK_BUILDERS = {
     ContentType.TABLE: _table_block,
 }
 
-
 def _page_text(page: Page) -> str:
     # Text-only extraction for embeddings
     parts = [
@@ -55,24 +54,6 @@ def _page_text(page: Page) -> str:
         and block.text_content
     ]
     return "\n".join(parts)
-
-
-def _cosine_similarity(a: list[float], b: list[float]) -> float:
-    dot = sum(x * y for x, y in zip(a, b))
-    norm_a = sum(x * x for x in a) ** 0.5
-    norm_b = sum(y * y for y in b) ** 0.5
-    if norm_a == 0 or norm_b == 0:
-        return 0.0
-    return dot / (norm_a * norm_b)
-
-
-def _top_k_chunks(
-    chunks: list[Chunk], query_embedding: list[float], k: int = TOP_K_CHUNKS
-) -> list[Chunk]:
-    scored = [(c, _cosine_similarity(c.embedding, query_embedding)) for c in chunks]
-    scored.sort(key=lambda pair: pair[1], reverse=True)
-    return [c for c, _score in scored[:k]]
-
 
 class GeminiService:
     def __init__(self):
@@ -154,47 +135,56 @@ class GeminiService:
     def chat(
         self,
         messages: list[ChatMessage],
-        chunks: Optional[list[Chunk]] = None,
-        grounding_chunks: Optional[list[Chunk]] = None,
+        relevant_chunks: Optional[list[Chunk]] = None,
     ) -> str:
+        """
+        Formats conversation history and database-retrieved chunks into Gemini request payloads,
+        then calls content generation.
+        """
         try:
-            relevant_chunks: list[Chunk] = list(grounding_chunks or [])
-            last_message_content = messages[-1].content.strip() if messages else ""
-
-            # Vector similarity search over historical banked chunks if prompt has text
-            if chunks and last_message_content:
-                query_embedding = self.embed_texts(
-                    [last_message_content], task_type="RETRIEVAL_QUERY"
-                )[0]
-                relevant_chunks += _top_k_chunks(chunks, query_embedding)
-
-            # Deduplicate excerpts by content & page
+            # Deduplicate retrieved chunks by source, page, and raw content to prevent context bloating
+            unique_chunks: list[Chunk] = []
             seen = set()
-            unique_chunks = []
-            for chunk in relevant_chunks:
-                identifier = (chunk.source, chunk.page_number, chunk.content)
+
+            for chunk in relevant_chunks or []:
+                identifier = (
+                    chunk.source,
+                    chunk.page_number,
+                    chunk.content,
+                )
+
                 if identifier not in seen:
                     seen.add(identifier)
                     unique_chunks.append(chunk)
 
             contents = []
+
             for i, msg in enumerate(messages):
                 is_last = i == len(messages) - 1
                 is_model = msg.role == ChatRole.ASSISTANT
+
                 parts = []
 
+                # Inject unique retrieved excerpts exclusively into the final user prompt turn
                 if is_last and not is_model and unique_chunks:
                     excerpts = "\n\n".join(
-                        f"[From {c.source}, page {c.page_number}]\n{c.content}"
-                        for c in unique_chunks
+                        f"[From {chunk.source}, page {chunk.page_number}]\n"
+                        f"{chunk.content}"
+                        for chunk in unique_chunks
                     )
+
                     parts.append(
                         types.Part(
-                            text=f"[RELEVANT DOCUMENT EXCERPTS]\n{excerpts}\n[END EXCERPTS]\n\n"
+                            text=(
+                                "[RELEVANT DOCUMENT EXCERPTS]\n"
+                                f"{excerpts}\n"
+                                "[END EXCERPTS]\n\n"
+                            )
                         )
                     )
 
                 parts.append(types.Part(text=msg.content))
+
                 contents.append(
                     types.Content(
                         role="model" if is_model else "user",
@@ -216,7 +206,6 @@ class GeminiService:
             raise
         except Exception as e:
             raise ServiceError(f"Gemini request failed: {str(e)}")
-
 
 # Single reusable instance
 gemini_service = GeminiService()

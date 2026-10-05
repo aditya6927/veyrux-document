@@ -191,8 +191,6 @@ export async function deleteConversation(
 interface SendConversationMessageOptions {
   conversationId: string;
   content: string;
-  chunks?: Chunk[];
-  groundingChunks?: Chunk[];
 }
 
 interface SendMessageResponsePayload {
@@ -207,8 +205,6 @@ interface SendMessageResponsePayload {
 export async function sendConversationMessage({
   conversationId,
   content,
-  chunks = [],
-  groundingChunks = [],
 }: SendConversationMessageOptions): Promise<{
   userMessage: Message;
   assistantMessage: Message;
@@ -220,12 +216,7 @@ export async function sendConversationMessage({
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        content,
-        chunks: chunks.length > 0 ? chunks : undefined,
-        grounding_chunks:
-          groundingChunks.length > 0 ? groundingChunks : undefined,
-      }),
+      body: JSON.stringify({ content }),
     },
   );
 
